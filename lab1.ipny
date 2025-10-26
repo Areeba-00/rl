@@ -1,0 +1,157 @@
+import gym
+import numpy as np
+import matplotlib.pyplot as plt
+
+#===== Core Utilities (Gym API safe) =====#
+def make_env(is_slippery=False,map_name="4x4",seed=0):
+    env=gym.make('FrozenLake-v1',is_slippery=is_slippery,map_name=map_name)
+    try:env.reset(seed=seed)
+    except:pass
+    return env
+
+def reset_env(env):
+    out=env.reset()
+    if isinstance(out,tuple):obs,info=out
+    else:obs=out
+    return int(obs)
+
+def step_env(env,action):
+    out=env.step(action)
+    if len(out)==5:
+        obs,r,terminated,truncated,info=out
+        done=terminated or truncated
+    else:
+        obs,r,done,info=out
+    return int(obs),float(r),bool(done),info
+
+def action_name(a):
+    names={0:"Left",1:"Down",2:"Right",3:"Up"}
+    return names.get(int(a),str(a))
+
+#===== Environment Introspection =====#
+def env_info(env):
+    obs_space=str(env.observation_space)
+    act_space=str(env.action_space)
+    return {"observation_space":obs_space,"action_space":act_space}
+
+def print_env_info(env):
+    info=env_info(env)
+    print("Observation Space:",info["observation_space"])
+    print("Action Space:",info["action_space"])
+    print("Actions: 0=Left,1=Down,2=Right,3=Up")
+
+#===== Agent-Environment Interaction (single episode) =====#
+def run_episode_random(env,max_steps=200,verbose=False):
+    s=reset_env(env)
+    done=False
+    steps=0
+    total_reward=0.0
+    path=[s]
+    while not done and steps<max_steps:
+        a=env.action_space.sample()
+        ns,r,done,_=step_env(env,a)
+        total_reward=total_reward+r
+        if verbose:
+            print(f"Step {steps}: State={s}, Action={a}({action_name(a)}), Reward={r}, NextState={ns}, Done={done}")
+        s=ns
+        path.append(s)
+        steps=steps+1
+    return {"total_reward":total_reward,"steps":steps,"path":path}
+
+def run_episode_manual(env,actions,verbose=False):
+    s=reset_env(env)
+    done=False
+    steps=0
+    total_reward=0.0
+    path=[s]
+    for a in actions:
+        if done:break
+        ns,r,done,_=step_env(env,int(a))
+        total_reward=total_reward+r
+        if verbose:
+            print(f"Step {steps}: State={s}, Action={a}({action_name(a)}), Reward={r}, NextState={ns}, Done={done}")
+        s=ns
+        path.append(s)
+        steps=steps+1
+    return {"total_reward":total_reward,"steps":steps,"path":path,"done":done}
+
+#===== Batch Runs & Tracking =====#
+def run_many_random(env,n_episodes=10,max_steps=200,verbose=False):
+    rewards=[]
+    paths=[]
+    for ep in range(n_episodes):
+        out=run_episode_random(env,max_steps=max_steps,verbose=verbose)
+        rewards.append(out["total_reward"])
+        paths.append(out["path"])
+        if verbose:print(f"Episode {ep+1} total_reward={out['total_reward']}\n")
+    return rewards,paths
+
+def run_many_manual(env,actions,n_episodes=10,verbose=False):
+    rewards=[]
+    paths=[]
+    for ep in range(n_episodes):
+        out=run_episode_manual(env,actions,verbose=verbose)
+        rewards.append(out["total_reward"])
+        paths.append(out["path"])
+        if verbose:print(f"Episode {ep+1} total_reward={out['total_reward']}, done={out['done']}\n")
+    return rewards,paths
+
+#===== Visualization =====#
+def visualize_path(path,size=4):
+    grid=np.full((size,size),'-',dtype=object)
+    for i,s in enumerate(path):
+        r,c=divmod(int(s),size)
+        grid[r,c]=str(i)
+    for row in grid:print(' '.join(row))
+
+def plot_rewards(rewards,title="Random Policy Reward per Episode"):
+    plt.figure()
+    plt.plot(rewards)
+    plt.xlabel("Episode")
+    plt.ylabel("Total Reward")
+    plt.title(title)
+    plt.show()
+
+#===== Deterministic vs Stochastic Comparison =====#
+def compare_envs(n_episodes=50,max_steps=200,seed=0,plot=True):
+    env_det=make_env(is_slippery=False,seed=seed)
+    env_sto=make_env(is_slippery=True,seed=seed)
+    r_det,_=run_many_random(env_det,n_episodes=n_episodes,max_steps=max_steps,verbose=False)
+    r_sto,_=run_many_random(env_sto,n_episodes=n_episodes,max_steps=max_steps,verbose=False)
+    avg_det=float(np.mean(r_det))
+    avg_sto=float(np.mean(r_sto))
+    print("Deterministic avg reward:",avg_det)
+    print("Stochastic avg reward:",avg_sto)
+    if plot:
+        plt.figure()
+        plt.plot(r_det,label="Deterministic")
+        plt.plot(r_sto,label="Stochastic")
+        plt.xlabel("Episode")
+        plt.ylabel("Total Reward")
+        plt.title("Random Policy: Deterministic vs Stochastic Rewards")
+        plt.legend()
+        plt.show()
+    return {"deterministic_rewards":r_det,"stochastic_rewards":r_sto}
+
+#===== Turnkey Demo Runner (call what you need) =====#
+def demo_all():
+    # 1) Setup deterministic env
+    env=make_env(is_slippery=False)
+    print_env_info(env)
+    # 2) Single random episode with verbose tracing
+    out=run_episode_random(env,max_steps=100,verbose=True)
+    print(f"Episode ended: steps={out['steps']}, total_reward={out['total_reward']}")
+    print("Path grid (deterministic):")
+    visualize_path(out["path"],size=4)
+    # 3) Track rewards across episodes and plot
+    rewards,_=run_many_random(env,n_episodes=10,max_steps=100,verbose=False)
+    plot_rewards(rewards,title="Random Policy Reward per Episode (Deterministic)")
+    # 4) Manual policy example (edit to your sequence)
+    actions=[2,2,1,1]  # example: Right,Right,Down,Down (may succeed on 4x4 deterministic)
+    r_manual,_=run_many_manual(env,actions,n_episodes=5,verbose=True)
+    plot_rewards(r_manual,title="Manual Policy Reward per Episode (Deterministic)")
+    # 5) Deterministic vs Stochastic comparison
+    compare_envs(n_episodes=50,max_steps=100,seed=0,plot=True)
+
+# If you want to run everything quickly:
+# demo_all()
